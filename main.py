@@ -48,19 +48,25 @@ difficult = 1
 ttcd = 0.3
 def setDifficult():
     global total_cost, total_speed, total_time, difficult, ttcd
+    
     ttcd -= delta_time
+    
     if ttcd < 0:
         ttcd = 0.3
+        
         if difficult < 3: difficult += 1
         else: difficult = 1
+            
         if difficult == 1: #easy
             total_time = 120
             total_speed = 7
             total_cost = 0.05
+            
         if difficult == 2: #normal
             total_time = 135
             total_speed = 6
             total_cost = 0.08
+            
         if difficult == 3: #hard
             total_time = 150
             total_speed = 4
@@ -138,8 +144,10 @@ class Scoreboard(Object):
         super().__call__(
             screen, scene, *args, **kwds
         )
+        
         mx, my = pygame.mouse.get_pos()
         prs, _, _ = pygame.mouse.get_pressed()
+        
         if self.hitbox.collidepoint(mx, my) and player.action_hitbox.colliderect(self.hitbox) and prs:
             return self.Open(screen, manager)
 
@@ -155,11 +163,16 @@ class FlagObject(Object):
         self.flag = False
 
     def __call__(self, screen, scene, player, *args, **kwds):
-        super().__call__(screen, scene, *args, **kwds)
+        super().__call__(
+            screen, scene, *args, **kwds
+        )
+        
         self.color = (0, 255, 0) if self.flag else (255, 255, 255)
         self.texture = self.const_texture_true if self.flag else self.const_texture #
+        
         mx, my = pygame.mouse.get_pos()
         prs, _, _ = pygame.mouse.get_pressed()
+        
         if self.hitbox.collidepoint(mx, my) and player.action_hitbox.colliderect(self.hitbox) and prs and self.flag:
             self.flag = not self.flag
 
@@ -178,8 +191,10 @@ class Door(Object):
         super().__call__(
             screen, scene, *args, **kwds
         )
+        
         self.color = (0, 100, 0) if player.hitbox.colliderect(self.hitbox) else (0, 30, 0)
         self.texture = self.const_texture_true if player.hitbox.colliderect(self.hitbox) else self.const_texture #
+        
         if player.hitbox.colliderect(self.hitbox) and keyboard.is_pressed('e') and self.canOpen and player.door_open_cooldown <= 0:
             player.door_open_cooldown = 1
             setTargetScene(self.target_scene)
@@ -197,6 +212,7 @@ class Wasted(FlagObject):
 
     def __call__(self, screen, scene, player, *args, **kwds):
         if not self.flag:
+            
             if player.inventory < 3:
                 player.inventory += 1
                 self.collected = True
@@ -729,4 +745,5 @@ def Main():
         pygame.display.flip()
 
 if __name__ == '__main__':
+
     Menu()
