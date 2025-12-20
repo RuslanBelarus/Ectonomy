@@ -628,7 +628,7 @@ def EndCostScreen(player : Player, manager : Manager):
             if titres.finished:
                 Menu()
 
-        if difficult < 3:
+        if difficult < 3 and dialog.finished:
             Menu()
         
         pygame.display.flip()
@@ -757,3 +757,4 @@ def Main():
 if __name__ == '__main__':
 
     Menu()
+
