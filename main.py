@@ -1,6 +1,9 @@
-import pygame, keyboard, random, math, dataclasses, copy
+import pygame, keyboard, random, dataclasses, threading
 pygame.font.init()
 pygame.init()
+
+pygame.display.set_caption('Ectonomy Release')
+pygame.display.set_icon(pygame.image.load('textures/icon.ico'))
 
 class textures:
     bath = pygame.image.load('textures/bath.png')
@@ -24,12 +27,25 @@ class textures:
     player = pygame.image.load('textures/player.png')
 
 screen_size = (32*26, 32*18)
-screen = pygame.display.set_mode(screen_size, pygame.SCALED | pygame.FULLSCREEN)
+screen = pygame.display.set_mode(screen_size) #, pygame.FULLSCREEN | pygame.SCALED
 screen.set_alpha(0)
 fps = 60
 delta_time = 1 / fps
 clock = pygame.time.Clock()
 target_scene = None
+total_time = 120
+total_speed = 7
+total_cost = 0.05
+telled = False
+gamerun = True
+
+class difficults:
+    easy = (120, 7, 0.05)
+    normal = (135, 6, 0.08)
+    hard = (10, 4, 0.13)
+
+difficult = 1
+difficult_list = [difficults.easy, difficults.normal, difficults.hard]
 
 def setTargetScene(scene):
     global target_scene
@@ -39,38 +55,17 @@ def getTargetScene():
     global target_scene
     return target_scene
 
-total_time = 120
-total_speed = 7
-total_cost = 0.05
-
-difficult = 1
-
 ttcd = 0.3
 def setDifficult():
     global total_cost, total_speed, total_time, difficult, ttcd
-    
+
     ttcd -= delta_time
-    
-    if ttcd < 0:
-        ttcd = 0.3
-        
-        if difficult < 3: difficult += 1
-        else: difficult = 1
-            
-        if difficult == 1: #easy
-            total_time = 120
-            total_speed = 7
-            total_cost = 0.05
-            
-        if difficult == 2: #normal
-            total_time = 135
-            total_speed = 6
-            total_cost = 0.08
-            
-        if difficult == 3: #hard
-            total_time = 150
-            total_speed = 4
-            total_cost = 0.13
+    if ttcd > 0: return 0
+    ttcd = 0.3
+
+    difficult += 1 if difficult < 3 else -2
+    total_time, total_speed, total_cost = difficult_list[difficult-1]
+
 
 @dataclasses.dataclass
 class Object:
@@ -111,18 +106,24 @@ class Scoreboard(Object):
             x, y, width, height, color, texture=textures.scoreboard
         )
     
-    def Open(self, screen, manager):
-        while True:
+    def Open(self, screen, manager, flags_group, timer, player):
+        global gamerun
+        while gamerun:
 
-            screen.fill((255, 255, 255))
+            screen.fill((0,0,0))
             clock.tick(fps)
 
             for event in pygame.event.get():
                 if event.type == pygame.quit:
                     pass
-            
+
+            manager(flags_group)
+            if timer.timer <= 0 and timer.timer != -1:
+                EndCostScreen(player, manager)
+            if timer.timer >= 0: timer.timer -= delta_time
             if keyboard.is_pressed('esc'): break
-            screen.blit(pygame.transform.scale(textures.scoreboard, screen_size), (0, 0))
+
+            screen.blit(pygame.transform.scale(textures.scoreboard, [screen_size[0]/2,screen_size[1]/2]), ([screen_size[0]/4,screen_size[1]/4]))
 
             _font = pygame.font.Font(None, 100)
             _surf = _font.render(
@@ -133,23 +134,21 @@ class Scoreboard(Object):
             screen.blit(
                 _surf,
                 (
-                    100+((533-100)-_surf.get_width())/2,
-                    93+((215-93)-_surf.get_height())/2
+                    290,
+                    190
                 )
             )
 
             pygame.display.flip()
 
-    def __call__(self, screen, scene, player, manager, *args, **kwds):
+    def __call__(self, screen, scene, player, manager, timer, flags_group, *args, **kwds):
         super().__call__(
             screen, scene, *args, **kwds
         )
-        
         mx, my = pygame.mouse.get_pos()
         prs, _, _ = pygame.mouse.get_pressed()
-        
         if self.hitbox.collidepoint(mx, my) and player.action_hitbox.colliderect(self.hitbox) and prs:
-            return self.Open(screen, manager)
+            return self.Open(screen, manager, flags_group, timer, player)
 
 class FlagObject(Object):
 
@@ -163,16 +162,11 @@ class FlagObject(Object):
         self.flag = False
 
     def __call__(self, screen, scene, player, *args, **kwds):
-        super().__call__(
-            screen, scene, *args, **kwds
-        )
-        
+        super().__call__(screen, scene, *args, **kwds)
         self.color = (0, 255, 0) if self.flag else (255, 255, 255)
         self.texture = self.const_texture_true if self.flag else self.const_texture #
-        
         mx, my = pygame.mouse.get_pos()
         prs, _, _ = pygame.mouse.get_pressed()
-        
         if self.hitbox.collidepoint(mx, my) and player.action_hitbox.colliderect(self.hitbox) and prs and self.flag:
             self.flag = not self.flag
 
@@ -191,10 +185,8 @@ class Door(Object):
         super().__call__(
             screen, scene, *args, **kwds
         )
-        
         self.color = (0, 100, 0) if player.hitbox.colliderect(self.hitbox) else (0, 30, 0)
         self.texture = self.const_texture_true if player.hitbox.colliderect(self.hitbox) else self.const_texture #
-        
         if player.hitbox.colliderect(self.hitbox) and keyboard.is_pressed('e') and self.canOpen and player.door_open_cooldown <= 0:
             player.door_open_cooldown = 1
             setTargetScene(self.target_scene)
@@ -212,7 +204,6 @@ class Wasted(FlagObject):
 
     def __call__(self, screen, scene, player, *args, **kwds):
         if not self.flag:
-            
             if player.inventory < 3:
                 player.inventory += 1
                 self.collected = True
@@ -235,9 +226,13 @@ class Replic:
         self.finished = False
 
     def Render(self, screen):
-        #_ = round(self.const_cooldown-self.cooldown)
+        if self.continued == len(self.replics):
+            self.finished = True
+
+        if self.finished:
+            return 0
+        
         font = pygame.font.Font(None, 40)
-        #_text = self.replics[self.continued][0:_]
         _text = self.replics[self.continued][0:round(((self.const_cooldown-self.cooldown)*len(self.replics[self.continued]))/self.const_cooldown+1)]
         _surf = font.render(
             _text,
@@ -255,16 +250,13 @@ class Replic:
                 screen_size[1]-_surf.get_height()-60
             )
         )
-        
+
         if self.cooldown <= -0.5:
             
             if self.continued < len(self.replics):
                 self.continued += 1
             
             self.cooldown = self.const_cooldown
-        
-        if self.continued == len(self.replics):
-            self.finished = True
 
 class Npc(FlagObject):
 
@@ -286,7 +278,7 @@ class Npc(FlagObject):
             player.inventory = 0
             self.flag = not self.flag
         
-        if self.dialogued == True:
+        if self.dialogued:
             self.dialog.Render(screen)
         
         if self.dialog.finished:
@@ -306,7 +298,12 @@ class Phone(FlagObject):
         self.texture = textures.phone
         self.dialog = Replic(['Добрый день! Пришло время платить коммуналку.', 'Через 2 минуты вам придет счёт.', 'Его нужно оплатить сразу.'])
 
+    def _Draw(self, screen):
+        if getTargetScene().id == 0: super()._Draw(screen)
+
     def __call__(self, screen, scene, player, manager, timer, *args, **kwds):
+        global telled
+
         if not self.flag and self.dialogued == False:
             self.dialogued = True
         
@@ -319,8 +316,8 @@ class Phone(FlagObject):
             
         if self.st == True and timer.timer == -1:
             timer.timer = total_time
-            
-
+            telled = True
+        
         return super().__call__(screen, scene, player, *args, **kwds)
 
 class Player(Object):
@@ -415,11 +412,14 @@ class Scene:
 @dataclasses.dataclass
 class Manager:
 
-    cost : int = 0
+    cost : int = 0.0
     timeout : int = total_speed
     const_timeout : int = timeout
     
     def __call__(self, flags_group, *args, **kwds):
+        if not telled:
+            return 0
+
         self.timeout -= delta_time
 
         k = len(
@@ -433,7 +433,7 @@ class Manager:
                 return 0
             
             random_index = random.randint(0, len(flags_group)-1)
-            if flags_group[random_index][1].flag == False:
+            if not flags_group[random_index][1].flag:
                 flags_group[random_index][1].flag = True
                 self.timeout = self.const_timeout
 
@@ -469,13 +469,18 @@ class Button:
             self.text,
             False, _color,
             __color
-        )
+        )   
 
         screen.blit(_surf, (self.x, self.y))
 
 def Menu():
-    nullScene = Scene((32*20, 32*9), list(screen_size), id=993)
 
+    def endg():
+        global gamerun
+        gamerun = False
+
+    nullScene = Scene((32*20, 32*9), list(screen_size), id=993)
+    
     entrance_room_menu = Scene((32*20, 32*9), list(screen_size), id=-2)
     entrance_room_menu.addObject(Door(20, entrance_room_menu.size[1]-150, 100, 150, canOpen=False, scene=None))
     entrance_room_menu.addObject(Door(140, entrance_room_menu.size[1]-150, 100, 150, canOpen=False, scene=None))
@@ -487,14 +492,14 @@ def Menu():
     
     setTargetScene(entrance_room_menu)
 
-    while True:
-
+    global gamerun
+    while gamerun:
         screen.fill((0, 0, 0))
         clock.tick(fps)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                exit()
+                gamerun = False
         
         _font = pygame.font.Font(None, 30)
         _color = (30, 30, 30)
@@ -540,15 +545,15 @@ def Menu():
         elif difficult == 3: _color = (200, 0, 0)
         Button(50, 250, 60, 'Difficult')(screen, lambda _: setDifficult(), color=_color)
         Button(50, 300, 60, 'Education')(screen, lambda _: Education())
-        Button(50, 350, 60, 'Quit')(screen, lambda _: exit())
+        Button(50, 350, 60, 'Quit')(screen, lambda _: endg())
 
         pygame.display.flip()
 
 def Education():
-    titres = Replic([
+    educ = Replic([
         'Ответив на звонок, запускаетсяя таймер.',
-        'В доме начинают ломаться вещи.',
-        'Включенные объекты поглащают энергию.',
+        'В доме начинают открываться объекты.',
+        'Включенные и открытые объекты поглащают энергию.',
         'Этим они крутят счетчик.',
         'Через время таймера, придут коллеторы.',
         'Они возьмут ваши деньги.',
@@ -569,7 +574,9 @@ def Education():
         textures.wasted,
         None
     ]
-    while True:
+
+    global gamerun
+    while gamerun:
 
         if keyboard.is_pressed('p'):
             Menu()
@@ -579,28 +586,28 @@ def Education():
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                exit()
+                gamerun = False
         
-        try:screen.blit(pygame.transform.scale(tiles[titres.continued], (200, 200)), ((screen_size[0]-200)/2, (screen_size[1]-200)/2))
+        try: screen.blit(pygame.transform.scale(tiles[educ.continued], (200, 200)), ((screen_size[0]-200)/2, (screen_size[1]-200)/2))
         except: pass
 
-        titres.Render(screen)
-        if titres.finished:
+        educ.Render(screen)
+        if educ.finished:
             Menu()
         
         pygame.display.flip()
 
 def EndCostScreen(player : Player, manager : Manager):
-    titres = Replic(['Спасибо за то, что прошли мою игру', 'Игру разрабатывали:', 'Какой-то мужик : Lixpan4ik (кодер)', 'Злодей-британец : Martin&Rose (художник)', 'Пубертатная язва : AlexMine2010 (помошник)', 'Бюджет игры: подзотыльник, 3 кириешки'], speed=3)
+    titres = Replic(['Спасибо за прохождение', 'Игру разрабатывали:', 'Какой-то мужик : Lixpan4ik (кодер)', 'Злодей-британец : Martin&Rose (художник)', 'Пубертатная язва : AlexMine2010 (помошник)', 'Бюджет игры: подзотыльник, 3 кириешки'], speed=3)
     dialog = Replic(['В дверь постучали...', '*тук* *тук* *тук*', 'Это оказались коллекторы.', 'Вы дали им денег.', 'Сверив сумму со счетчиком...'], speed=2.5) #2.5
+    
     if player.balance >= manager.cost:
-        _list = [', а вы смогли пережить этот день', '']
-        dialog.replics.append('Они ушли' + _list[random.randint(0, len(_list)-1)] + '...')
+        dialog.replics.append('Они ушли...')
     else:
-        _list = ['Ваше лицо встретило биту', 'Вы были избиты', 'Вы посмотрели вперед и увидели свои зубы', 'Вы уснули вечным сном']
-        dialog.replics.append(_list[random.randint(0, len(_list)-1)] + '...')
+        dialog.replics.append('Вы были избиты...')
 
-    while True:
+    global gamerun
+    while gamerun:
 
         if keyboard.is_pressed('p'):
             Menu()
@@ -610,17 +617,19 @@ def EndCostScreen(player : Player, manager : Manager):
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                exit()
+                gamerun = False
         
-        try: dialog.Render(screen)
-        except:
-            if difficult >= 3:
-                titres.Render(screen)
-                if titres.finished:
-                    Menu()
-            else: Menu()
-            
-        #dialog.Render(screen)
+        dialog.Render(screen)
+
+        if difficult >= 3 and dialog.finished:
+
+            titres.Render(screen)
+
+            if titres.finished:
+                Menu()
+
+        if difficult < 3:
+            Menu()
         
         pygame.display.flip()
 
@@ -639,6 +648,7 @@ def Main():
     corridor_room.addObject(Door(250, corridor_room.size[1]-150, 100, 150, scene=bathroom_room))
     corridor_room.addObject(Object(420, corridor_room.size[1]-80, 160, 80, color=(10,10,10), texture=None))
     corridor_room.addObject(Phone(500, corridor_room.size[1]-80-40, 40, 40, (255, 255, 255)))
+    #corridor_room.addObject(Phone(500, corridor_room.size[1]-80-40, 40, 40, (255, 255, 255))) Phone(500, corridor_room.size[1]-80-40, 40, 40, (255, 255, 255))
     corridor_room.addObject(Scoreboard(450, corridor_room.size[1]-65, 50, 50, color=(255, 255, 255)))
 
     kitchen_room.addObject(Door(kitchen_room.size[0]-20, kitchen_room.size[1]-150, 40, 150, scene=corridor_room))
@@ -670,7 +680,6 @@ def Main():
     ]
 
     timer = Timer()
-    gamerun = True
     manager = Manager()
 
     for i in range(random.randint(4, 6)):
@@ -688,6 +697,7 @@ def Main():
         140
     )
 
+    global gamerun
     while gamerun:
         
         if keyboard.is_pressed('p'):
@@ -695,11 +705,11 @@ def Main():
 
         if timer.timer <= 0 and timer.timer != -1:
             EndCostScreen(player, manager)
+        
+        if timer.timer >= 0: timer.timer -= delta_time
 
         screen.fill((0, 0, 0))
         clock.tick(fps)
-
-        if timer.timer >= 0: timer.timer -= delta_time
 
         _font = pygame.font.Font(None, 46)
         _color = (255, 0, 0) if timer.timer <= 10 else (255, 255, 255)
@@ -712,7 +722,7 @@ def Main():
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                exit()
+                gamerun = False
         
         pygame.draw.rect(
             screen,
@@ -729,13 +739,13 @@ def Main():
 
         for obj in getTargetScene().collection:
             obj(
-                screen, getTargetScene(), player, manager, timer
+                screen, getTargetScene(), player, manager, timer, flags_group
             )
 
         for obj in flags_group:
             if obj[0] == getTargetScene().id:
                 obj[1](
-                    screen, getTargetScene(), player, manager
+                    screen, getTargetScene(), player, manager, timer, flags_group
                 )
 
         player(screen, getTargetScene())
@@ -745,5 +755,4 @@ def Main():
         pygame.display.flip()
 
 if __name__ == '__main__':
-
     Menu()
