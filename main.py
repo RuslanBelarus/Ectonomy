@@ -42,7 +42,7 @@ gamerun = True
 class difficults:
     easy = (120, 7, 0.05)
     normal = (135, 6, 0.08)
-    hard = (10, 4, 0.13)
+    hard = (150, 4, 0.13)
 
 difficult = 1
 difficult_list = [difficults.easy, difficults.normal, difficults.hard]
@@ -755,4 +755,5 @@ def Main():
         pygame.display.flip()
 
 if __name__ == '__main__':
+
     Menu()
