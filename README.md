@@ -1,1 +1,1 @@
-![Моя картинка](md/ex_img_screenshots/screen1.png)
+![Моя картинка](screenshots/screen1.png)
